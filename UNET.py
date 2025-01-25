@@ -144,29 +144,36 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load("unet_weights.pth", map_location=device))
     criterion = nn.L1Loss()  # Mean Squared Error for bounding box regression
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    epochs = 100
+    epochs = 500
+    chunk_size = 16
     print("start training")
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
         for slices, labels in train_loader:
-            # Move to device
-            slices, labels = slices.to(device), labels.to(device)  # slices: (1, 128, 1, 128, 156), labels: (1, 128, 4)
+            for i in range(0,slices.shape[0],chunk_size):
+                slices_i = slices[i:i+chunk_size,:,:,:] # slices_i: (16, 1, 128, 156)
+                labels_i = labels[i:i + chunk_size, :]  # slices_i: (16, 4)
+                if labels_i.max() == -1: # empty chunk
+                    continue
+                # Move to device
+                slices_i, labels_i = slices_i.to(device), labels_i.to(device)  # slices: (1, 16, 1, 128, 156), labels: (1, 16, 4)
 
-            # Flatten the batch of slices
-            slices = slices.view(-1, 1, 128, 156)  # Shape: (128, 1, 128, 156)
-            labels = labels.view(-1, 4)  # Shape: (128, 4)
+                # Flatten the batch of slices
+                slices_i = slices_i.view(-1, 1, 128, 156)  # Shape: (16, 1, 128, 156)
+                labels_i = labels_i.view(-1, 4)  # Shape: (16, 4)
 
-            # Forward pass
-            outputs = model(slices)  # Shape: (128, 4)
-            loss = criterion(outputs, labels)
 
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                # Forward pass
+                outputs = model(slices_i)  # Shape: (16, 4)
+                loss = criterion(outputs, labels_i)
 
-            train_loss += loss.item() * slices.size(0)
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item() * slices_i.size(0)
 
         train_loss /= len(train_loader.dataset) * 128  # Normalize by total slices
 
@@ -186,8 +193,8 @@ if __name__ == "__main__":
         val_loss /= len(val_loader.dataset) * 128
 
         print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-        if epoch%10 == 0 and epoch >0:
-            print(f"saving checkpoint on epoch {epoch}")
+        if (epoch+1)%10 == 0 and epoch >0:
+            print(f"saving checkpoint on epoch {epoch+1}")
             torch.save(model.state_dict(), "unet_weights.pth")
-
+    torch.save(model.state_dict(), "unet_weights.pth")
 
