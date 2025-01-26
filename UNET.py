@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from google.protobuf.internal.well_known_types import Timestamp
 from torch.utils.data import Dataset, DataLoader
 import h5py
 import numpy as np
-
+from GeneralFunctions import TimestampToString
 
 class UNet(nn.Module):
     def __init__(self,n_class):
@@ -109,11 +110,11 @@ class DynamicKeySliceDataset(Dataset):
                 if rows.size > 0 and cols.size > 0:
                     x_min, x_max = cols.min(), cols.max()
                     y_min, y_max = rows.min(), rows.max()
-                    bounding_boxes.append([x_min, y_min, x_max, y_max])
+                    bounding_boxes.append([x_min, y_min, x_max, y_max, 1]) #last index is objectness indicator
                 else:
                     # If the slice has no non-zero elements, add a default box ((-1, -1, -1, -1))
-                    bounding_boxes.append([-1, -1, -1, -1])
-            mask = np.array(bounding_boxes) # Shape: (128,4)
+                    bounding_boxes.append([0, 0, 0, 0 , 0]) #no object to identify
+            mask = np.array(bounding_boxes) # Shape: (128,5)
         # Normalize image slices and add channel dimension
         slices = np.expand_dims(image, axis=1)    # Shape: (128, 1, 128, 156)
 
@@ -135,18 +136,34 @@ if __name__ == "__main__":
 
     # DataLoader
     batch_size = 1  # One 3D image (128 slices) per batch
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        prefetch_factor=2
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,  # No need to shuffle validation data
+        num_workers=4,  # Same as training for parallel loading
+        pin_memory=True,  # Useful for GPU acceleration
+        prefetch_factor=2  # Prefetch batches for efficiency
+    )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = UNet(n_class=4).to(device)
     model.load_state_dict(torch.load("unet_weights.pth", map_location=device))
     criterion = nn.L1Loss()  # Mean Squared Error for bounding box regression
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3) #change back lr to 1e-3 when loss starts converging
+    scaler = torch.amp.GradScaler('cuda')  # Initialize GradScaler for mixed precision
     epochs = 500
     chunk_size = 16
-    print("start training")
+
+    print(f"{TimestampToString()}: start training")
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
@@ -165,17 +182,19 @@ if __name__ == "__main__":
 
 
                 # Forward pass
-                outputs = model(slices_i)  # Shape: (16, 4)
-                loss = criterion(outputs, labels_i)
+                optimizer.zero_grad()
+                with torch.amp.autocast('cuda'):
+                    outputs = model(slices_i)  # Shape: (16, 4)
+                    loss = criterion(outputs, labels_i)
 
                 # Backward pass
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
 
                 train_loss += loss.item() * slices_i.size(0)
 
-        train_loss /= len(train_loader.dataset) * 128  # Normalize by total slices
+        train_loss /= len(train_loader.dataset) * 128  # Normalize by total slices (not really accurate, but it works fine so I won't interrupt it)
 
         # Validation loop
         model.eval()
@@ -192,9 +211,9 @@ if __name__ == "__main__":
 
         val_loss /= len(val_loader.dataset) * 128
 
-        print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        print(f"{TimestampToString()}: Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
         if (epoch+1)%10 == 0 and epoch >0:
             print(f"saving checkpoint on epoch {epoch+1}")
             torch.save(model.state_dict(), "unet_weights.pth")
     torch.save(model.state_dict(), "unet_weights.pth")
-
+    print("saved")

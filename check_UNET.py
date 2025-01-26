@@ -5,12 +5,12 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import h5py
 import numpy as np
-from UNET import UNet
+from UNET_alt import UNet
 import matplotlib.pyplot as plt
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = UNet(n_class=4).to(device)
-model.load_state_dict(torch.load("unet_weights.pth", map_location=device))
+model.load_state_dict(torch.load("unet_weights_alt.pth", map_location=device))
 model.eval()  # Set model to evaluation mode
 
 
@@ -49,8 +49,8 @@ with torch.no_grad():  # Disable gradient computation for faster inference
 predictions = predictions.cpu().numpy()
 for i, pred in enumerate(predictions):
     print(f"Slice {i}: Bounding Box: {pred}")
-    if i == 66:
-        x_min, y_min, x_max, y_max = np.round(pred).astype(int)
+    if i == 43:
+        x_min, y_min, x_max, y_max, valid = np.round(pred).astype(int)
         plt.imshow(img[:,:,66], cmap='gray')
         plt.title(f"Slice {i} with Predicted Box")
         plt.gca().add_patch(
