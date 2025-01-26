@@ -22,21 +22,22 @@ with h5py.File(h5_images, 'r') as img5f:
     img = img5f['image_0'][:]
     image = np.transpose(img,(2, 0, 1))  # Shape: (128, 156, 128) - reorder so index 0 will be the layer (instead of 2)
     slice_data = np.expand_dims(image, axis=1)  # Shape: (128, 1, 128, 156)
-# fig, axes = plt.subplots(1, 2, figsize=(10, 5))  # 1 row, 2 columns
-#
-# # Display the first image
-# axes[0].imshow(img[:,:,66], cmap='gray')
-# axes[0].set_title('Image 1')
-# axes[0].axis('off')  # Turn off axes
-#
-# # Display the second image
-# axes[1].imshow(slice_data[66,0,:,:], cmap='gray')
-# axes[1].set_title('Image 2')
-# axes[1].axis('off')  # Turn off axes
-#
-# # Adjust layout and show the plot
-# plt.tight_layout()
-# plt.show()
+    slice_data = slice_data[55:71,:,:,:]
+fig, axes = plt.subplots(1, 2, figsize=(10, 5))  # 1 row, 2 columns
+
+# Display the first image
+axes[0].imshow(img[:,:,66], cmap='gray')
+axes[0].set_title('Image 1')
+axes[0].axis('off')  # Turn off axes
+
+# Display the second image
+axes[1].imshow(slice_data[66-55,0,:,:], cmap='gray')
+axes[1].set_title('Image 2')
+axes[1].axis('off')  # Turn off axes
+
+# Adjust layout and show the plot
+plt.tight_layout()
+plt.savefig('check_layers')
 
 # Move input to the same device as the model
 
@@ -49,17 +50,19 @@ with torch.no_grad():  # Disable gradient computation for faster inference
 predictions = predictions.cpu().numpy()
 for i, pred in enumerate(predictions):
     print(f"Slice {i}: Bounding Box: {pred}")
-    if i == 43:
+    if i == 66-55:
         x_min, y_min, x_max, y_max, valid = np.round(pred).astype(int)
-        plt.imshow(img[:,:,66], cmap='gray')
-        plt.title(f"Slice {i} with Predicted Box")
+        plt.figure()
+        plt.imshow(img[:,:,i+55], cmap='gray')
+        plt.title(f"Slice {i+55} with Predicted Box")
         plt.gca().add_patch(
             plt.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min,
                           edgecolor='red', facecolor='none', lw=2)
         )
         # Show the plot
         plt.axis('off')  # Turn off axis labels
-        plt.show()
+        plt.savefig('saved_sht')
+plt.show()
 
 
 
