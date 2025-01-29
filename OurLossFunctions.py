@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torchvision.ops import generalized_box_iou
 
 class CombinedLoss(nn.Module):
     def __init__(self, alpha=1.0, beta=1.0):
@@ -125,4 +126,48 @@ class MaskedCombinedLoss(nn.Module):
 
         # Combine losses with weights
         total_loss = self.alpha * bbox_loss + self.beta * obj_loss
+        return total_loss
+
+class GiouCombinedLoss(nn.Module):
+    def __init__(self, alpha=1.0, beta=1.0):
+        """
+        Masked combined loss: GIoU loss for bounding box (only when obj=1) + BCE loss for objectness.
+        Args:
+            alpha (float): Weight for bounding box loss.
+            beta (float): Weight for objectness loss.
+        """
+        super(GiouCombinedLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.obj_loss_fn = nn.BCEWithLogitsLoss()  # BCE loss for objectness
+
+    def forward(self, pred, target):
+        """
+        Compute the masked combined loss.
+        Args:
+            pred (Tensor): Predicted output of shape (batch_size, 5) -> [x_min, y_min, x_max, y_max, objectness].
+            target (Tensor): Ground truth of shape (batch_size, 5) -> [x_min, y_min, x_max, y_max, objectness].
+        Returns:
+            Tensor: Total loss (scalar).
+        """
+        # Split predictions and targets
+        pred_boxes, pred_obj = pred[:, :4], pred[:, 4]
+        target_boxes, target_obj = target[:, :4], target[:, 4]
+
+        # Create a mask for valid boxes (objectness = 1)
+        mask = (target_obj == 1)
+
+        # Compute bounding box loss (only for valid boxes)
+        if mask.any():
+            # Compute GIoU loss
+            giou = generalized_box_iou(pred_boxes[mask], target_boxes[mask])
+            giou_loss = 1 - giou.mean()
+        else:
+            giou_loss = torch.tensor(0.0, device=pred.device)
+
+        # Compute objectness loss
+        obj_loss = self.obj_loss_fn(pred_obj, target_obj)
+
+        # Combine losses with weights
+        total_loss = self.alpha * giou_loss + self.beta * obj_loss
         return total_loss

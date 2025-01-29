@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,36 +7,39 @@ from google.protobuf.internal.well_known_types import Timestamp
 from torch.utils.data import Dataset, DataLoader
 import h5py
 import numpy as np
-from GeneralFunctions import TimestampToString
-from OurLossFunctions import MaskedCombinedLoss
+from GeneralFunctions import TimestampToString, accuracy_calc, create_plots
+from OurLossFunctions import MaskedCombinedLoss, GiouCombinedLoss
+
 
 class CNNBoundingBoxModel(nn.Module):
     def __init__(self):
         super(CNNBoundingBoxModel, self).__init__()
         # First block
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-        self.pool1 = nn.MaxPool2d(2, 2)  # Shrink image size
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=5, stride=1, padding=2) # output: 128x156x64
+        self.pool1 = nn.MaxPool2d(2, 2)  # Shrink image size                    # output: 64x78x64
         self.dropout1 = nn.Dropout(p=0.25)  # Dropout with 25% probability
 
         # Second block
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.pool2 = nn.MaxPool2d(2, 2)  # Shrink image size
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=5, stride=1, padding=2) # output: 64x78x128
+        self.pool2 = nn.MaxPool2d(2, 2)  # Shrink image size                     # output: 32x39x128
         self.dropout2 = nn.Dropout(p=0.25)  # Dropout with 25% probability
 
         # Third block
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
-        self.pool3 = nn.MaxPool2d(2, 2)  # Shrink image size
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)  # output: 32x39x256
+        self.pool3 = nn.MaxPool2d(2, 2)  # Shrink image size                       # output: 16x19x256
         self.dropout3 = nn.Dropout(p=0.25)  # Dropout with 25% probability
 
         # Fourth block (optional, deeper network)
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
-        self.pool4 = nn.MaxPool2d(2, 2)  # Shrink image size
+        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1)  # output: 16x19x512
+        self.pool4 = nn.MaxPool2d(2, 2)  # Shrink image size                       # output: 8x9x512
         self.dropout4 = nn.Dropout(p=0.25)  # Dropout with 25% probability
 
+        self.conv5 = nn.Conv2d(512, 1024, kernel_size=3, stride=1, padding=1)  # output: 8x9x512
+
         # Fully connected layers
-        self.fc1 = nn.Linear(256 * 8 * 9, 512)  # Adjust based on final image size
+        self.fc1 = nn.Linear(1024 * 8 * 9, 1024)  # Adjust based on final image size
         self.dropout_fc1 = nn.Dropout(p=0.5)  # Dropout with 50% probability
-        self.fc2 = nn.Linear(512, 5)  # Output 4 values: x_min, y_min, x_max, y_max
+        self.fc2 = nn.Linear(1024, 5)  # Output 5 values: x_min, y_min, x_max, y_max, objectness
 
 
     def forward(self, x):
@@ -51,7 +55,9 @@ class CNNBoundingBoxModel(nn.Module):
         x = self.pool4(torch.relu(self.conv4(x)))  # Optional deeper layer
         x = self.dropout4(x)  # Apply dropout after forth block
 
-        x = x.view(-1, 256 * 8 * 9)  # Flatten for fully connected layer
+        x = torch.relu(self.conv5(x))
+
+        x = x.view(-1, 1024 * 8 * 9)  # Flatten for fully connected layer
         x = torch.relu(self.fc1(x))
         x = self.dropout_fc1(x)  # Apply dropout after first FC layer
 
@@ -80,6 +86,7 @@ class DynamicKeySliceDataset(Dataset):
     def __getitem__(self, idx):
         # Open the HDF5 file for reading
         with h5py.File(self.h5_images, 'r') as f:
+            # print(f"processing {self.image_keys[idx]}")
             image = f[self.image_keys[idx]][:]  # Shape: (128, 156, 128)
             image = np.transpose(image, (
             2, 0, 1))  # Shape: (128, 156, 128) - reorder so index 0 will be the layer (instead of 2)
@@ -116,6 +123,7 @@ if __name__ == "__main__":
     dataset = DynamicKeySliceDataset(h5_images,h5_masks)
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
+    print(f"start training, train_size = {train_size}, val_size = {val_size}")
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
     # DataLoader
@@ -138,48 +146,59 @@ if __name__ == "__main__":
         prefetch_factor=2  # Prefetch batches for efficiency
     )
 
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = CNNBoundingBoxModel().to(device)
-    model.load_state_dict(torch.load("Checkpoints/cnn_weights_checkpoint_1_9.pth", map_location=device))
-    criterion = MaskedCombinedLoss(1.0,0.8)   # Loss of the output box and the Objectness index (L1 + BCEWithLogitsLoss)
+    model.load_state_dict(torch.load("Checkpoints6/cnn_weights_checkpoint_0_20.pth", map_location=device))
+    criterion = MaskedCombinedLoss(1,0.8)   # Loss of the output box and the Objectness index (L1 + BCEWithLogitsLoss)
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-5)
 
     scaler = torch.amp.GradScaler('cuda')  # Initialize GradScaler for mixed precision
-    epochs = 100
+    epochs = 200
     chunk_size = 128
 
     print(f"{TimestampToString()}: start training")
+
+    val_loss_arr = []
+    train_loss_arr = []
+    train_confusion_arr = []
+    train_iou_arr = []
+    validate_iou_arr = []
+    validate_confusion_arr = []
+
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
-        # if epoch < 5:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] = 1e-3
-        # elif epoch < 30:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] = 1e-4
-        # else:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] = 1e-4
-
+        if epoch < -1:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = 1e-4
+        elif epoch < -1:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = 5e-5
+        else:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = 3e-6
+        train_accuracy = [0, 0, 0, 0, 0]
         for slices, labels in train_loader:
             for i in range(0,slices.shape[0],chunk_size):
                 slices_i = slices[:,i:i+chunk_size,:,:,:] # slices_i: (16, 1, 128, 156)
                 labels_i = labels[:,i:i + chunk_size, :]  # slices_i: (16, 5)
+
                 # Move to device
-                slices_i, labels_i = slices_i.to(device), labels_i.to(device)  # slices: (1, 16, 1, 128, 156), labels: (1, 16, 5)
+                slices_i, labels_i = slices_i.to(device), labels_i.to(device)  # slices: (1, 128, 1, 128, 156), labels: (1, 128, 5)
 
                 # Flatten the batch of slices
-                slices_i = slices_i.view(-1, 1, 128, 156)  # Shape: (16, 1, 128, 156)
-                labels_i = labels_i.view(-1, 5)  # Shape: (16, 5)
+                slices_i = slices_i.view(-1, 1, 128, 156)  # Shape: (128, 1, 128, 156)
+                labels_i = labels_i.view(-1, 5)  # Shape: (128, 5)
 
 
                 # Forward pass
                 optimizer.zero_grad()
                 with torch.amp.autocast('cuda'):
-                    outputs = model(slices_i)  # Shape: (16, 5)
+                    outputs = model(slices_i)  # Shape: (128, 5)
                     loss = criterion(outputs, labels_i)
-
+                    train_accuracy_value = accuracy_calc(outputs, labels_i)
+                    train_accuracy = np.add(train_accuracy,train_accuracy_value)
                 # Backward pass
                 scaler.scale(loss).backward()
 
@@ -197,6 +216,7 @@ if __name__ == "__main__":
         # Validation loop
         model.eval()
         val_loss = 0.0
+        validate_accuracy = [0, 0, 0, 0, 0]
         with torch.no_grad():
             for slices, labels in val_loader:
                 slices, labels = slices.to(device), labels.to(device)
@@ -206,11 +226,53 @@ if __name__ == "__main__":
                 outputs = model(slices)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item() * slices.size(0)
+                validate_accuracy_value = accuracy_calc(outputs, labels)
+                validate_accuracy = np.add(validate_accuracy,validate_accuracy_value)
 
         val_loss /= len(val_loader.dataset) * 128
-
+        train_loss_arr.append(train_loss)
+        val_loss_arr.append(val_loss)
         print(f"{TimestampToString()}: Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+        if train_accuracy[0] > 0:
+            train_iou = train_accuracy[4]/train_accuracy[0] # iou_sum / true_positive_cnt
+        else:
+            train_iou = 0
+        train_iou_arr.append(train_iou)
+
+        train_tot = np.sum(train_accuracy[:4])
+        train_confusion = train_accuracy[:4]/train_tot
+        train_confusion_matrix = np.reshape(train_confusion,(2,2))
+        train_confusion_arr.append(train_confusion)
+        print(f"Train Stats: iou: {train_iou}, confusionmatrix:")
+        print(train_confusion_matrix)
+
+        if validate_accuracy[0] > 0:
+            validate_iou = validate_accuracy[4] / validate_accuracy[0]  # iou_sum / true_positive_cnt
+        else:
+            validate_iou = 0
+        validate_iou_arr.append(validate_iou)
+
+        validate_tot = np.sum(validate_accuracy[:4])
+        validate_confusion = validate_accuracy[:4] / validate_tot
+        validate_confusion_matrix = np.reshape(validate_confusion, (2, 2))
+        validate_confusion_arr.append(validate_confusion)
+        print(f"Validation Stats: iou: {validate_iou}, confusionmatrix:")
+        print(validate_confusion_matrix)
+
         if (epoch+1)%10 == 0 and epoch >0:
             print(f"saving checkpoint on epoch {epoch+1}")
-            torch.save(model.state_dict(), f"Checkpoints2/cnn_weights_checkpoint_2_{int((epoch+1)/10)}.pth")
+            torch.save(model.state_dict(), f"Checkpoints6/cnn_weights_checkpoint_1_{int((epoch+1)/10)}.pth")
             print("saved")
+            np.savetxt("Stats3/train_loss_arr.txt", train_loss_arr)
+            np.savetxt("Stats3/val_loss_arr.txt", val_loss_arr)
+            np.savetxt("Stats3/train_confusion_arr.txt", train_confusion_arr)
+            np.savetxt("Stats3/validate_confusion_arr.txt", validate_confusion_arr)
+            np.savetxt("Stats3/train_iou_arr.txt", train_iou_arr)
+            np.savetxt("Stats3/validate_iou_arr.txt", validate_iou_arr)
+
+    path_to_train_loss = "Stats2/train_loss_arr.txt"
+    path_to_validate_loss = "Stats2/val_loss_arr.txt"
+    path_to_train_iou = "Stats2/train_iou_arr.txt"
+    path_to_validate_iou = "Stats2/validate_iou_arr.txt"
+    create_plots(path_to_train_loss, path_to_validate_loss, path_to_train_iou, path_to_validate_iou)
