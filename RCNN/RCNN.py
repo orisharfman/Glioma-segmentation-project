@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch import no_grad
 from google.protobuf.internal.well_known_types import Timestamp
 from GeneralFunctions import TimestampToString
+from sklearn.preprocessing import MinMaxScaler
 
 
 import h5py
@@ -17,10 +18,15 @@ from colorama import Fore
 from colorama import Style
 
 
+
 def prepare_images(images):
     images = np.transpose(images, (
         2, 0, 1))  # Shape: (128, 156, 128) - reorder so index 0 will be the layer (instead of 2)
     images = np.expand_dims(images, axis=1)  # Shape: (128, 1, 128, 156)
+
+    # Reshape back to original shape (128, 1, 128, 156)
+    images = images.reshape(128, 1, 128, 156)
+
     images = torch.tensor(images, dtype=torch.float32)
     images = list(images.unbind(0))
     return images
@@ -53,23 +59,17 @@ def prepare_targrets(masks):
     return targets
 
 if __name__ == "__main__":
-
     torch.cuda.empty_cache()  # Clears unused memory from cache
     torch.cuda.ipc_collect()  # Forces garbage collection of unused tensors
 
 
     num_classes = 2  # only 1 class to find, and additional for background.
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
-    print(model)
-    exit(0)
 
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
-
+    print(f"cuda available = {torch.cuda.is_available()}")
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model.to(device)
-
-
     # checkpoint = torch.load("RCNN_meas/Checkpoints/rcnn_weights_checkpoint_0_2.pth",
     #                         map_location=device)  # Change to 'cuda' if using GPU
     # model.load_state_dict(checkpoint)
@@ -100,8 +100,9 @@ if __name__ == "__main__":
     #
     # model.transform.mean = [0.5]  # Adjust mean for grayscale
     # model.transform.std = [0.5]  # Adjust std for grayscale
+    chunk_size = 8
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-5)
+    optimizer = optim.Adam(model.parameters(), lr=5e-5)
 
     model.to(device)
 
@@ -119,7 +120,7 @@ if __name__ == "__main__":
 
     train_loss_arr = []
     val_loss_arr = []
-    num_epochs = 300
+    num_epochs = 30
 
     with h5py.File(h5_data_train, "r") as f_image, h5py.File(h5_masks_train, "r") as f_mask:
         image_keys = sorted(list(f_image.keys()))
@@ -129,8 +130,71 @@ if __name__ == "__main__":
         image_val_keys = sorted(list(f_image.keys()))
         mask_val_keys = sorted(list(f_mask.keys()))
         val_size = len(image_val_keys)
+
+
+    model.train()
+    print(f"{TimestampToString()}: start initial loss evaluation, train_size = {train_size}, val_size = {val_size}")
+
+    train_loss = 0
+    with h5py.File(h5_data_train, "r") as f_image, h5py.File(h5_masks_train, "r") as f_mask:
+        with torch.no_grad():
+            for key_idx in range(len(image_keys)):
+                if mask_keys[key_idx].split("_")[1] != image_keys[key_idx].split("_")[1]:  # sanity for keys
+                    print(f"not matching keys! {mask_keys[key_idx]}~{image_keys[key_idx]}")
+                    exit(-1)
+                images = f_image[image_keys[key_idx]]
+                images = prepare_images(images)
+
+                masks = f_mask[mask_keys[key_idx]]  # Shape: (128, 156, 128, 2)
+                masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                targets = prepare_targrets(masks)
+                for i in range(0, len(images), chunk_size):
+                    images_chunk = images[i:i + chunk_size]
+                    targets_chunk = targets[i:i + chunk_size]
+
+                    images_chunk = [img.to(device) for img in images_chunk]
+                    targets_chunk = [{k: v.to(device) for k, v in t.items()} for t in targets_chunk]
+                    loss_dict = model(images_chunk, targets_chunk)
+                    loss = loss_dict["loss_classifier"]*0.1+loss_dict["loss_box_reg"]*1.3+loss_dict["loss_objectness"]*1.3+loss_dict["loss_rpn_box_reg"]*1.3
+                    # loss = sum(loss for loss in loss_dict.values())
+                    train_loss += loss.item()
+
+
+    print(f"{TimestampToString()}: validation")
+    val_loss = 0
+
+    with h5py.File(h5_data_val, "r") as f_image, h5py.File(h5_masks_val, "r") as f_mask:
+        with torch.no_grad():
+            for key_idx in range(len(image_val_keys)):
+                if mask_val_keys[key_idx].split("_")[1] != image_val_keys[key_idx].split("_")[1]:  # sanity for keys
+                    print(f"not matching keys! {mask_keys[key_idx]}~{image_val_keys[key_idx]}")
+                    exit(-1)
+                images = f_image[image_val_keys[key_idx]]
+                images = prepare_images(images)
+
+                masks = f_mask[mask_val_keys[key_idx]]  # Shape: (128, 156, 128, 2)
+                masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                targets = prepare_targrets(masks)
+
+                for i in range(0, len(images), chunk_size):
+                    images_chunk = images[i:i + chunk_size]
+                    targets_chunk = targets[i:i + chunk_size]
+                    images_chunk = [img.to(device) for img in images_chunk]
+                    targets_chunk = [{k: v.to(device) for k, v in t.items()} for t in targets_chunk]
+                    # Run the model on the validation images
+                    loss_dict = model(images_chunk, targets_chunk)  # Get the loss dictionary
+                    loss = loss_dict["loss_classifier"]*0.1+loss_dict["loss_box_reg"]*1.3+loss_dict["loss_objectness"]*1.3+loss_dict["loss_rpn_box_reg"]*1.3
+                    # loss = sum(loss for loss in loss_dict.values())
+                    val_loss += loss.item()  # Total loss for this batch
+
+    train_loss = train_loss / (train_size * (128 / chunk_size))
+    val_loss = val_loss / (val_size * (128 / chunk_size))
+
+    print(f"{TimestampToString()}: Initial loss - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
     print(f"{TimestampToString()}: start training, train_size = {train_size}, val_size = {val_size}")
     for epoch in range(num_epochs):
+        optimizer.zero_grad()
         model.train()
         train_loss = 0
 
@@ -145,7 +209,6 @@ if __name__ == "__main__":
                 masks = f_mask[mask_keys[key_idx]] # Shape: (128, 156, 128, 2)
                 masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
                 targets = prepare_targrets(masks)
-                chunk_size = 8
                 for i in range(0,len(images),chunk_size):
                     images_chunk = images[i:i+chunk_size]
                     targets_chunk = targets[i:i+chunk_size]
@@ -153,8 +216,8 @@ if __name__ == "__main__":
                     images_chunk = [img.to(device) for img in images_chunk]
                     targets_chunk = [{k: v.to(device) for k, v in t.items()} for t in targets_chunk]
                     loss_dict = model(images_chunk, targets_chunk)
-                    loss = sum(loss for loss in loss_dict.values())
-                    optimizer.zero_grad()
+                    loss = loss_dict["loss_classifier"]*0.1+loss_dict["loss_box_reg"]*1.3+loss_dict["loss_objectness"]*1.3+loss_dict["loss_rpn_box_reg"]*1.3
+                    # loss = sum(loss for loss in loss_dict.values())
                     loss.backward()
                     optimizer.step()
                     train_loss += loss.item()
@@ -175,7 +238,6 @@ if __name__ == "__main__":
                     masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
                     targets = prepare_targrets(masks)
 
-                    chunk_size = 8
                     for i in range(0, len(images), chunk_size):
                         images_chunk = images[i:i + chunk_size]
                         targets_chunk = targets[i:i + chunk_size]
@@ -183,16 +245,18 @@ if __name__ == "__main__":
                         targets_chunk = [{k: v.to(device) for k, v in t.items()} for t in targets_chunk]
                         # Run the model on the validation images
                         loss_dict = model(images_chunk, targets_chunk)  # Get the loss dictionary
-                        loss = sum(loss for loss in loss_dict.values())
+                        loss = loss_dict["loss_classifier"] * 0.1 + loss_dict["loss_box_reg"] * 1.3 + loss_dict[
+                            "loss_objectness"] * 1.3 + loss_dict["loss_rpn_box_reg"] * 1.3
+                        # loss = sum(loss for loss in loss_dict.values())
                         val_loss += loss.item()# Total loss for this batch
 
-        train_loss = train_loss / (train_size*16)
-        val_loss = val_loss / (val_size*16)
+        train_loss = train_loss / (train_size*(128/chunk_size))
+        val_loss = val_loss / (val_size*(128/chunk_size))
         train_loss_arr.append(train_loss)
         val_loss_arr.append(val_loss)
         print(f"{TimestampToString()}: Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
         if True: #save checkpoint
             print(f"{TimestampToString()}: saving checkpoint on epoch {epoch + 1}")
-            torch.save(model.state_dict(),f"RCNN_meas/Checkpoints/rcnn_weights_checkpoint_2_{int(epoch + 1)}.pth")
-            np.savetxt("RCNN_meas/Stats/train_loss_arr_2.txt", train_loss_arr)
-            np.savetxt("RCNN_meas/Stats/val_loss_arr_2.txt", val_loss_arr)
+            torch.save(model.state_dict(),f"RCNN/RCNN_meas/Checkpoints/rcnn_weights_checkpoint_4_{int(epoch + 1)}.pth")
+            np.savetxt("RCNN/RCNN_meas/Stats/train_loss_arr_4.txt", train_loss_arr)
+            np.savetxt("RCNN/RCNN_meas/Stats/val_loss_arr_4.txt", val_loss_arr)
