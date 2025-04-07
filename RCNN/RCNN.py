@@ -18,7 +18,6 @@ from colorama import Fore
 from colorama import Style
 
 
-
 def prepare_images(images):
     images = np.transpose(images, (
         2, 0, 1))  # Shape: (128, 156, 128) - reorder so index 0 will be the layer (instead of 2)
@@ -59,6 +58,7 @@ def prepare_targrets(masks):
     return targets
 
 if __name__ == "__main__":
+
     torch.cuda.empty_cache()  # Clears unused memory from cache
     torch.cuda.ipc_collect()  # Forces garbage collection of unused tensors
 
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     #
     # model.transform.mean = [0.5]  # Adjust mean for grayscale
     # model.transform.std = [0.5]  # Adjust std for grayscale
-    chunk_size = 8
+    chunk_size = 16
 
     optimizer = optim.Adam(model.parameters(), lr=5e-5)
 
@@ -109,14 +109,14 @@ if __name__ == "__main__":
 
 
 
-    h5_data_train = "Data/train_data.h5"
-    h5_masks_train = "Data/train_masks.h5"
+    h5_data_train = "../Data/train_data.h5"
+    h5_masks_train = "../Data/train_masks.h5"
 
-    h5_data_val = "Data/val_data.h5"
-    h5_masks_val = "Data/val_masks.h5"
+    h5_data_val = "../Data/val_data.h5"
+    h5_masks_val = "../Data/val_masks.h5"
 
-    h5_data_test = "Data/test_data.h5"
-    h5_masks_test = "Data/test_masks.h5"
+    h5_data_test = "../Data/test_data.h5"
+    h5_masks_test = "../Data/test_masks.h5"
 
     train_loss_arr = []
     val_loss_arr = []
@@ -146,7 +146,7 @@ if __name__ == "__main__":
                 images = prepare_images(images)
 
                 masks = f_mask[mask_keys[key_idx]]  # Shape: (128, 156, 128, 2)
-                masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                masks = masks[:, :, :, 1].astype(np.uint8) +masks[:, :, :, 2].astype(np.uint8)
                 targets = prepare_targrets(masks)
                 for i in range(0, len(images), chunk_size):
                     images_chunk = images[i:i + chunk_size]
@@ -173,7 +173,7 @@ if __name__ == "__main__":
                 images = prepare_images(images)
 
                 masks = f_mask[mask_val_keys[key_idx]]  # Shape: (128, 156, 128, 2)
-                masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                masks = masks[:, :, :, 1].astype(np.uint8) +masks[:, :, :, 2].astype(np.uint8)
                 targets = prepare_targrets(masks)
 
                 for i in range(0, len(images), chunk_size):
@@ -207,7 +207,7 @@ if __name__ == "__main__":
                 images = prepare_images(images)
 
                 masks = f_mask[mask_keys[key_idx]] # Shape: (128, 156, 128, 2)
-                masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                masks = masks[:, :, :, 1].astype(np.uint8) +masks[:, :, :, 2].astype(np.uint8)
                 targets = prepare_targrets(masks)
                 for i in range(0,len(images),chunk_size):
                     images_chunk = images[i:i+chunk_size]
@@ -235,7 +235,7 @@ if __name__ == "__main__":
                     images = prepare_images(images)
 
                     masks = f_mask[mask_val_keys[key_idx]]  # Shape: (128, 156, 128, 2)
-                    masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                    masks = masks[:, :, :, 1].astype(np.uint8) +masks[:, :, :, 2].astype(np.uint8)
                     targets = prepare_targrets(masks)
 
                     for i in range(0, len(images), chunk_size):
@@ -257,6 +257,6 @@ if __name__ == "__main__":
         print(f"{TimestampToString()}: Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
         if True: #save checkpoint
             print(f"{TimestampToString()}: saving checkpoint on epoch {epoch + 1}")
-            torch.save(model.state_dict(),f"RCNN/RCNN_meas/Checkpoints/rcnn_weights_checkpoint_4_{int(epoch + 1)}.pth")
-            np.savetxt("RCNN/RCNN_meas/Stats/train_loss_arr_4.txt", train_loss_arr)
-            np.savetxt("RCNN/RCNN_meas/Stats/val_loss_arr_4.txt", val_loss_arr)
+            torch.save(model.state_dict(),f"RCNN_meas/Checkpoints/rcnn_weights_checkpoint_{int(epoch + 1)}.pth")
+            np.savetxt("RCNN_meas/Stats/train_loss_arr.txt", train_loss_arr)
+            np.savetxt("RCNN_meas/Stats/val_loss_arr.txt", val_loss_arr)

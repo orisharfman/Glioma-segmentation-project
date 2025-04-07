@@ -5,11 +5,13 @@ import numpy as np
 import h5py
 import matplotlib.pyplot as plt
 import os
+import sys
 join = os.path.join
 import torch
 from segment_anything import sam_model_registry
 from skimage import io, transform
 import torch.nn.functional as F
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import evaluation_functions
 
 def show_mask(mask, ax, random_color=False):
@@ -67,25 +69,28 @@ def prepare_image(img_2d):
     )  # normalize to [0, 1], (H, W, 3)\
 
     # convert the shape to (3, H, W)
-    img_1024_tensor = torch.tensor(img_1024).float().permute(2, 0, 1)
+    img_1024 = np.stack([img_1024] * 3, axis=0)
+    img_1024_tensor = torch.tensor(img_1024).float()
+
     # img_1024_tensor = torch.tensor(img_1024).float().permute(2, 0, 1).unsqueeze(0).to(device)
     return img_1024_tensor
 
-MedSAM_CKPT_PATH = "/content/drive/My Drive/Glioma Segmentation Project/medsam_vit_b.pth"
+MedSAM_CKPT_PATH = "medsam_vit_b.pth"
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+print(f"cuda available = {torch.cuda.is_available()}")
 medsam_model = sam_model_registry['vit_b'](checkpoint=MedSAM_CKPT_PATH)
 medsam_model = medsam_model.to(device)
 medsam_model.eval()
 
-h5_data_train = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/train_data.h5"
-h5_masks_train = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/train_masks.h5"
-h5_bbox_train = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/train_bbox.h5"
-h5_data_val = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/val_data.h5"
-h5_masks_val = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/val_masks.h5"
-h5_bbox_val = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/val_bbox.h5"
-h5_data_test = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/test_data.h5"
-h5_masks_test = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/test_masks.h5"
-h5_bbox_test = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/test_bbox.h5"
+h5_data_train = "../Data/train_data.h5"
+h5_masks_train = "../Data/train_masks.h5"
+h5_bbox_train = "../Data/train_boxs.h5"
+h5_data_val = "../Data/val_data.h5"
+h5_masks_val = "../Data/val_masks.h5"
+h5_bbox_val = "../Data/val_boxs.h5"
+h5_data_test = "../Data/test_data.h5"
+h5_masks_test = "../Data/test_masks.h5"
+h5_bbox_test = "../Data/test_boxs.h5"
 
 dice_arr = []
 iou_arr = []
@@ -117,14 +122,18 @@ for key_idx in range(len(image_train_keys)):
     images = f_image_train[image_train_keys[key_idx]]
     masks = f_masks_train[masks_train_keys[key_idx]]
     boxes = f_bbox_train[bbox_train_keys[key_idx]]
+
     H, W, _ = images.shape
     for i in range(0, images.shape[2]):
         image = prepare_image(images[:,:,i]).unsqueeze(0).to(device)
-        box = boxes[i] #FixMe - needs to fit 1024x1024 images
-        mask = masks[:,:,i,1] #fixme - make sure this is the right mask
+
+        box = boxes[i]
+        box  = box * 1024 / np.array([W,H,W,H])
+        box = np.expand_dims(box, axis=0)  # (4,) → (1, 4)
+
+        mask = masks[:,:,i,1]
         with torch.no_grad():
             image_embedding = medsam_model.image_encoder(image)  # (1, 256, 64, 64)
-
         medsam_seg = medsam_inference(medsam_model, image_embedding, box, H, W)
         #check if mask exists
         iou_arr.append(evaluation_functions.iou(medsam_seg, mask, threshold=0.5))
@@ -132,6 +141,10 @@ for key_idx in range(len(image_train_keys)):
         tn, fp, fn, tp = evaluation_functions.confusion_matrix_calculation(medsam_seg, mask, threshold=0.5)
         precision_arr.append(evaluation_functions.precision(tp, fp))
         recall_arr.append(evaluation_functions.recall(tp, fn))
+np.savetxt("initial_medsam/Meas/iou_arr.txt", iou_arr)
+np.savetxt("initial_medsam/Meas//dice_arr.txt", dice_arr)
+np.savetxt("initial_medsam/Meas//recall_arr.txt", recall_arr)
+np.savetxt("initial_medsam/Meas//precision_arr.txt", precision_arr)
 
 
 

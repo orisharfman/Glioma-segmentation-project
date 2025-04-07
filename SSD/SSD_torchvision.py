@@ -75,12 +75,12 @@ if __name__ == "__main__":
 
 
 
-    h5_data_train = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/train_data.h5"
-    h5_masks_train = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/train_masks.h5"
-    h5_data_val = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/val_data.h5"
-    h5_masks_val = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/val_masks.h5"
-    h5_data_test = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/test_data.h5"
-    h5_masks_test = "/home/tauproj12/PycharmProjects/Glioma-segmentation-project/Data/test_masks.h5"
+    h5_data_train = "../Data/train_data.h5"
+    h5_masks_train = "../Data/train_masks.h5"
+    h5_data_val = "../Data/val_data.h5"
+    h5_masks_val = "../Data/val_masks.h5"
+    h5_data_test = "../Data/test_data.h5"
+    h5_masks_test = "../Data/test_masks.h5"
 
     train_loss_arr = []
     val_loss_arr = []
@@ -110,7 +110,7 @@ if __name__ == "__main__":
             images = f_image_train[image_train_keys[key_idx]]
             images = prepare_images(images)
             masks = f_masks_train[masks_train_keys[key_idx]]  # Shape: (128, 156, 128, 2)
-            masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+            masks = masks[:, :, :, 1].astype(np.uint8) + masks[:, :, :, 2].astype(np.uint8)
             targets = prepare_targrets(masks)
 
             for i in range(0, len(images), chunk_size):
@@ -135,7 +135,7 @@ if __name__ == "__main__":
                 images = f_image_val[image_val_keys[key_idx]]
                 images = prepare_images(images)
                 masks = f_masks_val[masks_val_keys[key_idx]]  # Shape: (128, 156, 128, 2)
-                masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+                masks = masks[:, :, :, 1].astype(np.uint8) + masks[:, :, :, 2].astype(np.uint8)
                 targets = prepare_targrets(masks)
                 for i in range(0, len(images), chunk_size):
                     images_chunk = images[i:i + chunk_size]
