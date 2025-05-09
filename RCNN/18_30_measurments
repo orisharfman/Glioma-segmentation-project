@@ -1,0 +1,18 @@
+train summery:
+total slices = 64896
+diou average = tensor([0.8998])
+-------------------
+confusion matrix:
+TP:0.27 | FP:0.07
+FN:0.08 | TN:0.58
+-------------------
+
+
+validation summery:
+total slices = 17280
+diou average = tensor([0.9013])
+-------------------
+confusion matrix:
+TP:0.27 | FP:0.07
+FN:0.08 | TN:0.58
+-------------------
