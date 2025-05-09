@@ -90,7 +90,7 @@ if __name__ == "__main__":
             images = f_image_train[image_train_keys[key_idx]]
             images = prepare_images(images)
             masks = f_masks_train[masks_train_keys[key_idx]]  # Shape: (128, 156, 128, 2)
-            masks = masks[:, :, :, 1].astype(np.uint8)  # Shape: (128, 156, 128)
+            masks = masks[:, :, :, 1].astype(np.uint8) +masks[:, :, :, 2].astype(np.uint8)
             boxes,labels = prepare_targrets(masks)
             optimizer.zero_grad()
             detections_batch  = ssd_model(images)  # Outputs: (128, 4, 8732), (128, 81, 8732)
