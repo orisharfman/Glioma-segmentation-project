@@ -50,11 +50,11 @@ def calc_iou(pred_boxes, target_boxes):
 
     return iou
 
-def create_plots(path_to_train_loss, path_to_validate_loss, path_to_train_iou, path_to_validate_iou):
-    path_to_train_loss = "Stats2/train_loss_arr.txt"
-    path_to_validate_loss = "Stats2/val_loss_arr.txt"
-    path_to_train_iou = "Stats2/train_iou_arr.txt"
-    path_to_validate_iou = "Stats2/validate_iou_arr.txt"
+def create_plots(path_to_train_loss, path_to_validate_loss, path_to_train_iou, path_to_validate_iou, path_to_train_dice, path_to_validate_dice):
+    # path_to_train_loss = "Stats2/train_loss_arr.txt"
+    # path_to_validate_loss = "Stats2/val_loss_arr.txt"
+    # path_to_train_iou = "Stats2/train_iou_arr.txt"
+    # path_to_validate_iou = "Stats2/validate_iou_arr.txt"
 
     with open(path_to_train_loss) as train_loss_file:
         train_loss_arr = np.array([float(line.strip()) for line in train_loss_file])
@@ -64,36 +64,57 @@ def create_plots(path_to_train_loss, path_to_validate_loss, path_to_train_iou, p
         validate_loss_arr = np.array([float(line.strip()) for line in validate_loss_file])
         print(f"validate_loss_arr shape: {validate_loss_arr.shape}")
     with open(path_to_train_iou) as train_iou_file:
-        train_iou_arr = [line.strip() for line in train_iou_file]
+        train_iou_arr = [float(line.strip()) for line in train_iou_file]
     with open(path_to_validate_iou) as validate_iou_file:
-        validate_iou_arr = [line.strip() for line in validate_iou_file]
+        validate_iou_arr = [float(line.strip()) for line in validate_iou_file]
 
-    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+    with open(path_to_train_dice) as train_dice_file:
+        train_dice_arr = [float(line.strip()) for line in train_dice_file]
+    with open(path_to_validate_dice) as validate_dice_file:
+        validate_dice_arr = [float(line.strip()) for line in validate_dice_file]
 
-    axs[0, 0].plot(range(len(train_loss_arr)),train_loss_arr)
-    axs[0, 0].set_title('Train Loss')
-    axs[0, 0].set_xlabel('Epoch')
-    axs[0, 0].set_ylabel('Loss')
+    fig, axs = plt.subplots(1, 3, figsize=(10, 8))
 
-    axs[0, 1].plot(range(len(validate_loss_arr)),validate_loss_arr)
-    axs[0, 1].set_title('Validation Loss')
-    axs[0, 1].set_xlabel('Epoch')
-    axs[0, 1].set_ylabel('Loss')
+    axs[0].plot(range(len(train_loss_arr)),train_loss_arr, label = "Train Loss")
+    axs[0].plot(range(len(validate_loss_arr)),validate_loss_arr, label = "Validation Loss")
+    axs[0].set_title('Loss')
+    axs[0].set_xlabel('Epoch')
+    axs[0].set_ylabel('Loss')
+    axs[0].set_ylim(0, max(max(train_loss_arr), max(validate_loss_arr)) * 1.1)
+    axs[0].legend()
 
-    axs[1, 0].plot(range(len(train_iou_arr)),train_iou_arr)
-    axs[1, 0].set_title('Train IoU')
-    axs[1, 0].set_xlabel('Epoch')
-    axs[1, 0].set_ylabel('IoU')
-    axs[1, 0].yaxis.set_major_locator(MaxNLocator(nbins=5))
 
-    axs[1, 1].plot(range(len(validate_iou_arr)),validate_iou_arr)
-    axs[1, 1].set_title('Validation IoU')
-    axs[1, 1].set_xlabel('Epoch')
-    axs[1, 1].set_ylabel('IoU')
-    axs[1, 1].yaxis.set_major_locator(MaxNLocator(nbins=5))
+    axs[1].plot(range(len(train_iou_arr)),train_iou_arr, label = "Train IoU")
+    axs[1].plot(range(len(validate_iou_arr)),validate_iou_arr, label = "Validation IoU")
+    axs[1].set_title('IoU')
+    axs[1].set_xlabel('Epoch')
+    axs[1].set_ylabel('IoU')
+    axs[1].yaxis.set_major_locator(MaxNLocator(nbins=5))
+    axs[1].set_ylim(0, max(max(train_iou_arr), max(validate_iou_arr)) * 1.1)
+    axs[1].legend()
+
+    axs[2].plot(range(len(train_dice_arr)),train_dice_arr, label = "Train Dice")
+    axs[2].plot(range(len(validate_dice_arr)),validate_dice_arr, label = "Validation Dice")
+    axs[2].set_title('Dice')
+    axs[2].set_xlabel('Epoch')
+    axs[2].set_ylabel('Dice')
+    axs[2].yaxis.set_major_locator(MaxNLocator(nbins=5))
+    axs[2].set_ylim(0, max(max(train_dice_arr), max(validate_dice_arr)) * 1.1)
+
+    axs[2].legend()
+
 
 
     #plt.grid(True)
     plt.tight_layout()
     plt.savefig('loss_iou.png')
     plt.show()
+
+
+# path_to_train_loss = "SAM/meas_merged/loss_arr_train.txt"
+# path_to_validate_loss = "SAM/meas_merged/loss_arr_val.txt"
+# path_to_train_iou = "SAM/meas_merged/iou_arr_train.txt"
+# path_to_validate_iou = "SAM/meas_merged/iou_arr_val.txt"
+# path_to_train_dice = "SAM/meas_merged/dice_arr_train.txt"
+# path_to_validate_dice = "SAM/meas_merged/dice_arr_val.txt"
+# create_plots(path_to_train_loss, path_to_validate_loss, path_to_train_iou, path_to_validate_iou, path_to_train_dice, path_to_validate_dice)
