@@ -79,7 +79,9 @@ MedSAM_CKPT_PATH = "medsam_vit_b.pth"
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 print(f"cuda available = {torch.cuda.is_available()}")
 medsam_model = sam_model_registry['vit_b'](checkpoint=MedSAM_CKPT_PATH)
-medsam_model = medsam_model.to(device)
+
+
+
 medsam_model.eval()
 
 h5_data_train = "../Data/train_data.h5"
@@ -115,26 +117,42 @@ bbox_val_keys = sorted(list(f_bbox_val.keys()))
 train_size = len(image_train_keys)
 val_size = len(image_val_keys)
 
-for key_idx in range(len(image_train_keys)):
-    if image_train_keys[key_idx].split("_")[1] != masks_train_keys[key_idx].split("_")[1]:  # sanity for keys
-        print(f"not matching keys! {image_train_keys[key_idx]}~{masks_train_keys[key_idx]}")
-        exit(-1)
-    images = f_image_train[image_train_keys[key_idx]]
-    masks = f_masks_train[masks_train_keys[key_idx]]
-    boxes = f_bbox_train[bbox_train_keys[key_idx]]
 
-    H, W, _ = images.shape
-    for i in range(0, images.shape[2]):
-        image = prepare_image(images[:,:,i]).unsqueeze(0).to(device)
+num_epochs = 10
 
-        box = boxes[i]
-        box  = box * 1024 / np.array([W,H,W,H])
-        box = np.expand_dims(box, axis=0)  # (4,) → (1, 4)
+for epoch in range(num_epochs):
+    medsam_model.train()
+    running_loss = 0.0
 
-        mask = masks[:,:,i,1]
-        with torch.no_grad():
-            image_embedding = medsam_model.image_encoder(image)  # (1, 256, 64, 64)
-        medsam_seg = medsam_inference(medsam_model, image_embedding, box, H, W)
+
+
+    for key_idx in range(len(image_train_keys)):
+        if image_train_keys[key_idx].split("_")[1] != masks_train_keys[key_idx].split("_")[1]:  # sanity for keys
+            print(f"not matching keys! {image_train_keys[key_idx]}~{masks_train_keys[key_idx]}")
+            exit(-1)
+        images = f_image_train[image_train_keys[key_idx]]
+        masks = f_masks_train[masks_train_keys[key_idx]]
+        boxes = f_bbox_train[bbox_train_keys[key_idx]]
+
+        H, W, _ = images.shape
+        for i in range(0, images.shape[2]):
+            image = prepare_image(images[:,:,i]).unsqueeze(0).to(device)
+
+            box = boxes[i]
+            box  = box * 1024 / np.array([W,H,W,H])
+            box = np.expand_dims(box, axis=0)  # (4,) → (1, 4)
+
+            mask = masks[:,:,i,1]
+            box = box.to(device)
+            mask = mask.to(device)
+
+            with torch.set_grad_enabled(True):
+                image_embedding = medsam_model.image_encoder(image)  # (1, 256, 64, 64)
+                medsam_seg = medsam_inference(medsam_model, image_embedding, box, H, W)
+                loss = criterion(medsam_seg, mask.float())
+                loss.backward()
+                optimizer.step()
+
         #check if mask exists
         iou_arr.append(evaluation_functions.iou(medsam_seg, mask, threshold=0.5))
         dice_arr.append(evaluation_functions.dice(medsam_seg, mask, threshold=0.5))
