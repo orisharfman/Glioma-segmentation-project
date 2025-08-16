@@ -1,3 +1,20 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:9483752f4ce7458ed0274d6168f84a346997d96bb29aba0581d2725e1d3c1af5
-size 664
+from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+from PyQt5.QtGui import QMovie
+
+class LoadingWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Running Segmentation")
+        self.setModal(True)
+        self.setFixedSize(300, 300)
+
+        layout = QVBoxLayout()
+        self.spinner_label = QLabel(self)
+        self.spinner_label.setAlignment(Qt.AlignCenter)
+
+        self.spinner = QMovie("assets/spinner.gif")
+        self.spinner_label.setMovie(self.spinner)
+        self.spinner.start()
+
+        layout.addWidget(self.spinner_label)
+        self.setLayout(layout)
